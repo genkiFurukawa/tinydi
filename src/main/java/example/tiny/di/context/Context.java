@@ -2,7 +2,7 @@ package example.tiny.di.context;
 
 import example.tiny.di.Main;
 import example.tiny.di.annotation.InvokeLog;
-import example.tiny.di.sample.Bar;
+import example.tiny.di.annotation.RequestScoped;
 import javassist.*;
 
 import javax.inject.Inject;
@@ -18,18 +18,23 @@ import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 // Context = 前後関係、文脈、脈絡、コンテキスト、状況、環境
 public class Context {
     static Map<String, Class> types = new HashMap<>();
     static Map<String, Object> beans = new HashMap<>();
+    static ThreadLocal<Map<String, Object>> requestBeans = new ThreadLocal<>();
 
 
+    /**
+     * @Namedの付いたクラスをtypesに登録する
+     */
     public static void autoRegister() {
         try {
-            URL res = Main.class.getResource(
-                    "/" + Main.class.getName().replace('.', '/') + ".class");
+            URL res = Main.class.getResource("/" + Main.class.getName().replace('.', '/') + ".class");
 
             String packageName = Main.class.getPackageName();
 
@@ -66,16 +71,36 @@ public class Context {
         types.put(name, type);
     }
 
+    /**
+     * nameと一致するオブジェクトをbeans or requestBeansを取得する
+     *
+     * @param name name
+     * @return Object
+     */
     public static Object getBean(String name) {
+        Class type = types.get(name);
+        Objects.requireNonNull(type, name + " not found.");
+
+        // @RequestScopedが付いているときは、scopeをrequestBeansにする
+        Map<String, Object> scope;
+        if (type.isAnnotationPresent(RequestScoped.class)) {
+            scope = requestBeans.get();
+            if (scope == null) {
+                scope = new HashMap<>();
+                requestBeans.set(scope);
+            }
+        } else {
+            scope = beans;
+        }
+
         // 検索してあればそのオブジェクトを返す
-        for (Map.Entry<String, Object> bean : beans.entrySet()) {
+        for (Map.Entry<String, Object> bean : scope.entrySet()) {
             if (bean.getKey().equals(name)) {
                 return bean.getValue();
             }
         }
+
         // ない場合は作成して返す
-        Class type = types.get(name);
-        Objects.requireNonNull(type, name + " not found.");
         try {
             return createObject(type);
         } catch (InstantiationException | IllegalAccessException ex) {
@@ -102,6 +127,14 @@ public class Context {
         return object;
     }
 
+    /**
+     * オブジェクトを生成する。
+     *
+     * @param type type
+     * @param <T>  T
+     * @return T
+     * @InvokeLogが付いているときはメソッドを拡張したオブジェクトを返す
+     */
     private static <T> Class<? extends T> wrap(Class<T> type) {
         try {
             // ClassPoolという、クラスパスを管理しクラスファイルをディスク等から実際に読み込む作業を行う、
@@ -158,6 +191,15 @@ public class Context {
         }
     }
 
+    /**
+     * @Injectの付いたフィールドに値をセットする
+     *
+     * @param type type
+     * @param object object
+     * @param <T> <T>
+     * @throws IllegalArgumentException
+     * @throws IllegalAccessException
+     */
     private static <T> void inject(Class<T> type, T object) throws IllegalArgumentException, IllegalAccessException {
         for (Field field : type.getDeclaredFields()) {
             if (!field.isAnnotationPresent(Inject.class)) {
@@ -165,8 +207,91 @@ public class Context {
             }
             // フィールドに値をセットする
             field.setAccessible(true);
+
+            Object bean;
+            if (!type.isAnnotationPresent(RequestScoped.class) && field.getType().isAnnotationPresent(RequestScoped.class)) {
+                bean = scopeWrapper(field.getType(), field.getName());
+            } else {
+                bean = getBean(field.getName());
+            }
+
             // フィールドに値をセットする
-            field.set(object, getBean(field.getName()));
+            field.set(object, bean);
+        }
+    }
+
+    private static Set<String> cannotOverrides = Stream.of("finalize", "clone").collect(Collectors.toSet());
+
+    /**
+     *
+     *
+     * @param type type
+     * @param name name
+     * @param <T>  T
+     * @return T
+     */
+    private static <T> T scopeWrapper(Class<T> type, String name) {
+        try {
+            System.out.println(">> scopeWrapper");
+            ClassPool pool = ClassPool.getDefault();
+
+            // 暫定対処（ないとNotFoundExceptionが吐かれる）
+            URL res = Main.class.getResource("/" + Main.class.getName().replace('.', '/') + ".class");
+            String packageName = Main.class.getPackageName();
+            Path mainClassPath = new File(new File(res.toURI()).getParent()).toPath();
+            Files.walk(mainClassPath)
+                    .filter(p -> !Files.isDirectory(p)) // ファイル以外は除外
+                    .filter(p -> p.toString().endsWith(".class")) // .class以外は除外
+                    .map(p -> mainClassPath.relativize(p))// Mainクラスからの相対パスを取得
+                    .map(p -> p.toString().replace(File.separatorChar, '.')) // 相対パスは/となっているので、.に変換
+                    .map(p -> packageName + "." + p) // パッケージ名とくっつける
+                    .map(n -> n.substring(0, n.length() - 6)) // .classを文字列から除外
+                    .forEach(n -> {
+                        try {
+                            Class c = Class.forName(n);
+                            pool.insertClassPath(new ClassClassPath(c));
+
+                        } catch (ClassNotFoundException ex) {
+                            throw new RuntimeException(ex);
+                        }
+                    });
+
+            CtClass cls = pool.getOrNull(type.getName() + "$$_");
+
+            // Nowというクラスにはもともといくつかメソッドがある
+            // ここでLocalCache<Now> orgというフィールドを作成し、orgのメソッドを元のメソッドに上書きする
+            // 各スレッドごとに保持される値に基づいたメソッドを作成できる
+            if (cls == null) {
+                // $$_をつけるクラスを作成する
+                CtClass orgCls = pool.get(type.getName());
+                cls = pool.makeClass(type.getName() + "$$_");
+                cls.setSuperclass(orgCls);
+
+                // ローカルオブジェクトを保持するフィールドを用意
+                CtClass tl = pool.get(LocalCache.class.getName());
+
+                // 引数にフィールドの型、フィールド名、宣言先を指定
+                CtField org = new CtField(tl, "org", cls);
+                // orgというフィールドにnew example.tiny.di.context.LocalCache("now");をセットする
+                // example.tiny.di.context.LocalCacheはnameというフィールドをもつ
+                cls.addField(org, "new " + LocalCache.class.getName() + "(\"" + name + "\");");
+
+                for (CtMethod method : orgCls.getMethods()) {
+                    if (Modifier.isFinal(method.getModifiers()) | cannotOverrides.contains(method.getName())) {
+                        continue;
+                    }
+
+                    CtMethod override = new CtMethod(method.getReturnType(), method.getName(), method.getParameterTypes(), cls);
+                    override.setExceptionTypes(method.getExceptionTypes());
+                    // 各メソッドに対応する委譲メソッドを作る
+                    // ex:{  return ((example.tiny.di.sample.Now)org.get()).toString($$);}
+                    override.setBody("{" + "  return ((" + type.getName() + ")org.get())." + method.getName() + "($$);" + "}");
+                    cls.addMethod(override);
+                }
+            }
+            return (T) cls.toClass().newInstance();
+        } catch (IOException | URISyntaxException | NotFoundException | IllegalAccessException | CannotCompileException | InstantiationException ex) {
+            throw new RuntimeException(ex);
         }
     }
 }
