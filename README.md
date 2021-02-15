@@ -19,6 +19,8 @@
 - `type.getDeclaredFields()`でクラスのフィールドを取得できること（クラスのメタ情報を扱う方法）
 - Springで`@Service`の定義を追いかけて行った時に`@Named`というアノテーションにたどり着いたが、`@Named`はDIコンテナにinjectするという意味を表すアノテーションであること
     - Foo.javaやBar.javaで使用した
+- アノテーションをつけてメソッドの機能を拡張するときはjavaAssistを使ってバイナリの操作をする
+    - @InvokeLogで実装
 
 ## ToDo
 - [作って理解するWebフレームワーク - きしだのHatena](https://nowokay.hatenablog.com/entry/20160419/1461032474)の写経
