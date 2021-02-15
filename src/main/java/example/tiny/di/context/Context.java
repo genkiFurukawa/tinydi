@@ -1,6 +1,9 @@
 package example.tiny.di.context;
 
 import example.tiny.di.Main;
+import example.tiny.di.annotation.InvokeLog;
+import example.tiny.di.sample.Bar;
+import javassist.*;
 
 import javax.inject.Inject;
 import javax.inject.Named;
@@ -15,6 +18,7 @@ import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.stream.Stream;
 
 // Context = 前後関係、文脈、脈絡、コンテキスト、状況、環境
 public class Context {
@@ -36,7 +40,7 @@ public class Context {
                     .filter(p -> p.toString().endsWith(".class")) // .class以外は除外
                     .map(p -> classPath.relativize(p))// Mainクラスからの相対パスを取得
                     .map(p -> p.toString().replace(File.separatorChar, '.')) // 相対パスは/となっているので、.に変換
-                    .map(p -> packageName  + "." + p) // パッケージ名とくっつける
+                    .map(p -> packageName + "." + p) // パッケージ名とくっつける
                     .map(n -> n.substring(0, n.length() - 6)) // .classを文字列から除外
                     .forEach(n -> {
                         try {
@@ -83,22 +87,86 @@ public class Context {
     // InstantiationException =>
     // アプリケーションが Class クラスの newInstance メソッドを使ってクラスのインスタンスを生成しようとしたときに、
     // クラスがインタフェースまたは abstract クラスであるために指定されたオブジェクトのインスタンスを生成できない場合にスローされます。
+    // memo: メソッドの戻り値の型の手前に<T>を書くと、その型パラメータTをメソッド内で使用することができる。
     private static <T> T createObject(Class<T> type) throws InstantiationException, IllegalAccessException {
-        T object = type.newInstance();
+        T object;
+        // InvokeLogアノテーションがある時はクラスをラップしたクラスにする
+        if (Stream.of(type.getDeclaredMethods()).anyMatch(m -> m.isAnnotationPresent(InvokeLog.class))) {
+            object = wrap(type).newInstance();
+        } else {
+            object = type.newInstance();
+        }
 
-        // getDeclaredFields => クラスのフィールドを取得
+        inject(type, object);
+
+        return object;
+    }
+
+    private static <T> Class<? extends T> wrap(Class<T> type) {
+        try {
+            // ClassPoolという、クラスパスを管理しクラスファイルをディスク等から実際に読み込む作業を行う、
+            // Javassistの要になるオブジェクトを取得
+            ClassPool pool = ClassPool.getDefault();
+
+            // 暫定対処（ないとNotFoundExceptionが吐かれる）
+            URL res = Main.class.getResource("/" + Main.class.getName().replace('.', '/') + ".class");
+            String packageName = Main.class.getPackageName();
+            Path mainClassPath = new File(new File(res.toURI()).getParent()).toPath();
+            Files.walk(mainClassPath)
+                    .filter(p -> !Files.isDirectory(p)) // ファイル以外は除外
+                    .filter(p -> p.toString().endsWith(".class")) // .class以外は除外
+                    .map(p -> mainClassPath.relativize(p))// Mainクラスからの相対パスを取得
+                    .map(p -> p.toString().replace(File.separatorChar, '.')) // 相対パスは/となっているので、.に変換
+                    .map(p -> packageName + "." + p) // パッケージ名とくっつける
+                    .map(n -> n.substring(0, n.length() - 6)) // .classを文字列から除外
+                    .forEach(n -> {
+                        try {
+                            Class c = Class.forName(n);
+                            pool.insertClassPath(new ClassClassPath(c));
+
+                        } catch (ClassNotFoundException ex) {
+                            throw new RuntimeException(ex);
+                        }
+                    });
+
+
+            // クラス名$$を生成し、Superclassを元のクラスにする
+            CtClass orgCls = pool.get(type.getName());
+            CtClass cls = pool.makeClass(type.getName() + "$$");
+            cls.setSuperclass(orgCls);
+
+            // @InvokeLogが付いていたらメソッドに時刻を表示する処理を加える
+            for (CtMethod method : orgCls.getDeclaredMethods()) {
+                if (!method.hasAnnotation(InvokeLog.class)) {
+                    continue;
+                }
+
+                CtMethod newMethod = new CtMethod(
+                        method.getReturnType(), method.getName(), method.getParameterTypes(), cls);
+                newMethod.setExceptionTypes(method.getExceptionTypes());
+                newMethod.setBody(
+                        "{"
+                                + "  System.out.println(java.time.LocalDateTime.now() + "
+                                + "\":" + method.getName() + " invoked.\"); "
+                                + "  return super." + method.getName() + "($$);"
+                                + "}");
+                cls.addMethod(newMethod);
+            }
+            return cls.toClass();
+        } catch (NotFoundException | CannotCompileException | IOException | URISyntaxException ex) {
+            throw new RuntimeException(ex);
+        }
+    }
+
+    private static <T> void inject(Class<T> type, T object) throws IllegalArgumentException, IllegalAccessException {
         for (Field field : type.getDeclaredFields()) {
-            // getAnnotation => アノテーションの取得
-            Inject inject = field.getAnnotation(Inject.class);
-            if (inject == null) {
+            if (!field.isAnnotationPresent(Inject.class)) {
                 continue;
             }
-            // フィールドを操作可能にする
+            // フィールドに値をセットする
             field.setAccessible(true);
             // フィールドに値をセットする
             field.set(object, getBean(field.getName()));
         }
-
-        return object;
     }
 }

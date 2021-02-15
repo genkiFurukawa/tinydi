@@ -2,7 +2,6 @@ package example.tiny.di;
 
 import example.tiny.di.context.Context;
 import example.tiny.di.sample.Bar;
-import example.tiny.di.sample.Foo;
 
 public class Main {
     public static void main(String[] args) {
