@@ -3,6 +3,8 @@ package example.tiny.di.context;
 import example.tiny.di.Main;
 import example.tiny.di.annotation.InvokeLog;
 import example.tiny.di.annotation.RequestScoped;
+import example.tiny.di.annotation.SessionScoped;
+import example.tiny.di.mvc.BeanSession;
 import javassist.*;
 
 import javax.inject.Inject;
@@ -24,7 +26,12 @@ public class Context {
     static Map<String, Class> types = new HashMap<>();
     static Map<String, Object> beans = new HashMap<>();
     static ThreadLocal<Map<String, Object>> requestBeans = new ThreadLocal<>();
+    static BeanSession beanSession;
 
+
+    public static void setBeanSession(BeanSession beanSession) {
+        Context.beanSession = beanSession;
+    }
 
     /**
      * @Namedの付いたクラスをtypesに登録する
@@ -86,7 +93,9 @@ public class Context {
                 scope = new HashMap<>();
                 requestBeans.set(scope);
             }
-        } else {
+        } else if (type.isAnnotationPresent(BeanSession.class)) {
+            scope = beanSession.getBeans();
+        }else {
             scope = beans;
         }
 
@@ -188,6 +197,18 @@ public class Context {
         }
     }
 
+    private static int scopeRank(Class type) {
+        if (type.isAnnotationPresent(RequestScoped.class)) {
+            return 0;
+        }
+
+        if (type.isAnnotationPresent(SessionScoped.class)) {
+            return 5;
+        }
+
+        return 10;
+    }
+
     /**
      * @Injectの付いたフィールドに値をセットする
      *
@@ -206,7 +227,7 @@ public class Context {
             field.setAccessible(true);
 
             Object bean;
-            if (!type.isAnnotationPresent(RequestScoped.class) && field.getType().isAnnotationPresent(RequestScoped.class)) {
+            if (scopeRank(type) > scopeRank(field.getType())) {
                 bean = scopeWrapper(field.getType(), field.getName());
             } else {
                 bean = getBean(field.getName());

@@ -2,6 +2,7 @@ package example.tiny.di;
 
 import example.tiny.di.annotation.Path;
 import example.tiny.di.context.Context;
+import example.tiny.di.mvc.BeanSession;
 import example.tiny.di.mvc.RequestInfo;
 import lombok.AllArgsConstructor;
 
@@ -11,8 +12,6 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -34,6 +33,9 @@ public class Server {
         Map<String, ProcessorMethod> methods = new HashMap<>();
 
         Context.autoRegister();
+        BeanSession beanSession = new BeanSession();
+        Context.setBeanSession(beanSession);
+
         Context.registerdClasses().forEach(entry -> {
             Class cls = entry.getValue();
             Path rootAnnotation = (Path) cls.getAnnotation(Path.class);
@@ -64,15 +66,15 @@ public class Server {
         Pattern pattern = Pattern.compile("([A-Z]+) ([^ ]+) (.+)");
         Pattern patternHeader = Pattern.compile("([A-Za-z-]+): (.+)");
 
-        AtomicLong lastSessionId = new AtomicLong();
+        AtomicLong lastSessionId = new AtomicLong(10);
 
         ServerSocket serverSocket = new ServerSocket(8989);
-        ExecutorService executors = Executors.newFixedThreadPool(10);
+
 
         while (true) {
             Socket socket = serverSocket.accept();
 
-            executors.execute(() -> {
+            new Thread(() -> {
                 try (InputStream is = socket.getInputStream();
                      BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(is))
                 ) {
@@ -111,7 +113,20 @@ public class Server {
                         }
                     }
 
-                    String sessionId = cookies.getOrDefault("jsessionid", Long.toString(lastSessionId.incrementAndGet()));
+                    String sessionId = cookies.get("jsessionid");
+
+                    if (sessionId != null) {
+                        if (!beanSession.isSessionRegistered(sessionId)) {
+                            sessionId = null;
+                        }
+                    }
+
+                    if (sessionId == null) {
+                        sessionId = Long.toString(lastSessionId.incrementAndGet());
+                    }
+
+                    beanSession.setSessionId(sessionId);
+
                     info.setSessionId(sessionId);
 
                     System.out.println("info:" + info);
@@ -140,7 +155,9 @@ public class Server {
                             pw.println();
                             pw.println(output);
                         } catch (Exception ex) {
-                            pw.println("HTTP/1.0 200 OK");
+                            System.out.println(ex);
+
+                            pw.println("HTTP/1.0 500 Internal Server Error");
                             pw.println("Content-Type: text/html");
                             pw.println();
                             pw.println("<h1>500 Internal Server Error</h1>");
@@ -150,7 +167,7 @@ public class Server {
                 } catch (IOException e) {
                     System.out.println(e);
                 }
-            });
+            }).start();
         }
     }
 }
