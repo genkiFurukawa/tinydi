@@ -15,10 +15,7 @@ import java.net.URISyntaxException;
 import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Set;
+import java.util.*;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -293,5 +290,9 @@ public class Context {
         } catch (IOException | URISyntaxException | NotFoundException | IllegalAccessException | CannotCompileException | InstantiationException ex) {
             throw new RuntimeException(ex);
         }
+    }
+
+    public static Collection<Map.Entry<String, Class>> registerdClasses() {
+        return types.entrySet();
     }
 }
