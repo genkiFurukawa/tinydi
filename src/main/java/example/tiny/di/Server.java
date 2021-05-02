@@ -155,7 +155,7 @@ public class Server {
                             pw.println();
                             pw.println(output);
                         } catch (Exception ex) {
-                            System.out.println(ex);
+                            ex.printStackTrace();
 
                             pw.println("HTTP/1.0 500 Internal Server Error");
                             pw.println("Content-Type: text/html");

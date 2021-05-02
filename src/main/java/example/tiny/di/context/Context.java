@@ -13,6 +13,7 @@ import java.io.File;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
 import java.net.URISyntaxException;
 import java.net.URL;
 import java.nio.file.Files;
@@ -25,7 +26,7 @@ import java.util.stream.Stream;
 public class Context {
     static Map<String, Class> types = new HashMap<>();
     static Map<String, Object> beans = new HashMap<>();
-    static ThreadLocal<Map<String, Object>> requestBeans = new ThreadLocal<>();
+    static ThreadLocal<Map<String, Object>> requestBeans = new InheritableThreadLocal<>();
     static BeanSession beanSession;
 
 
@@ -227,11 +228,19 @@ public class Context {
             field.setAccessible(true);
 
             Object bean;
+            System.out.println(">>");
+            System.out.println("type:" + field.getType() + ", name:" + field.getName());
+            System.out.println("scopeRank(type):" + scopeRank(type) + ", scopeRank(field.getType()):" + scopeRank(field.getType()));
             if (scopeRank(type) > scopeRank(field.getType())) {
-                bean = scopeWrapper(field.getType(), field.getName());
+                bean = getBean(field.getName());
+                if (bean == null) {
+                    System.out.println("bean is null");
+                    bean = scopeWrapper(field.getType(), field.getName());
+                }
             } else {
                 bean = getBean(field.getName());
             }
+            System.out.println("<<");
 
             // フィールドに値をセットする
             field.set(object, bean);
@@ -307,8 +316,8 @@ public class Context {
                     cls.addMethod(override);
                 }
             }
-            return (T) cls.toClass().newInstance();
-        } catch (IOException | URISyntaxException | NotFoundException | IllegalAccessException | CannotCompileException | InstantiationException ex) {
+            return (T) cls.toClass().getDeclaredConstructor().newInstance();
+        } catch (IOException | URISyntaxException | NotFoundException | IllegalAccessException | CannotCompileException | InstantiationException | NoSuchMethodException | InvocationTargetException ex) {
             throw new RuntimeException(ex);
         }
     }

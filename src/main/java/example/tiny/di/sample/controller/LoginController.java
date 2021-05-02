@@ -16,6 +16,7 @@ public class LoginController {
     @Path("index")
     public String index() {
         String title = "<h1>Login</h1>";
+        System.out.println("loginSession:" + loginSession);
         if (loginSession.isLogined()) {
             return title + "Login at " + loginSession.getLoginTime();
         } else {
