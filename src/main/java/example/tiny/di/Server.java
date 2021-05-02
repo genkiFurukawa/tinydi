@@ -2,6 +2,7 @@ package example.tiny.di;
 
 import example.tiny.di.annotation.Path;
 import example.tiny.di.context.Context;
+import example.tiny.di.mvc.RequestInfo;
 import lombok.AllArgsConstructor;
 
 import java.io.*;
@@ -10,6 +11,8 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -38,7 +41,12 @@ public class Server {
             }
 
             String root = trimSlash(rootAnnotation.value());
-            for (Method method: cls.getMethods()) {
+
+            if (!root.isEmpty()) {
+                root = "/" + root;
+            }
+
+            for (Method method : cls.getMethods()) {
                 Path pathAnnotation = method.getAnnotation(Path.class);
 
                 if (pathAnnotation == null) {
@@ -52,13 +60,15 @@ public class Server {
         });
 
         Pattern pattern = Pattern.compile("([A-Z]+) ([^ ]+) (.+)");
+        Pattern patternHeader = Pattern.compile("([A-Za-z-]+): (.+)");
 
         ServerSocket serverSocket = new ServerSocket(8989);
+        ExecutorService executors = Executors.newFixedThreadPool(10);
 
         while (true) {
             Socket socket = serverSocket.accept();
 
-            new Thread(() -> {
+            executors.execute(() -> {
                 try (InputStream is = socket.getInputStream();
                      BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(is))
                 ) {
@@ -72,43 +82,65 @@ public class Server {
                     String protocol = matcher.group(3);
 
                     System.out.println("httpMethod:" + httpMethod + ", path:" + path + ", protocol:" + protocol);
+                    System.out.println("socket.getLocalAddress():" + socket.getLocalAddress());
+
+                    RequestInfo info = (RequestInfo) Context.getBean("requestInfo");
+
+                    System.out.println("before info:" + info);
+                    info.setInetAddress(socket.getLocalAddress());
+                    info.setPath(path);
 
                     for (String line; (line = bufferedReader.readLine()) != null && !line.isEmpty(); ) {
-                        try (OutputStream os = socket.getOutputStream();
-                             PrintWriter pw = new PrintWriter(os)) {
-
-                            ProcessorMethod method = methods.get(path);
-                            if (method == null) {
-                                pw.println("HTTP/1.0 404 Not Found");
-                                pw.println("Content-Type: text/html");
-                                pw.println();
-                                pw.println("<h1>404 Not Found</h1>");
-                                pw.println(path + " Not Found");
-                                return;
-                            }
-
-                            try{
-                                Object bean = Context.getBean(method.name);
-                                Object output = method.method.invoke(bean);
-
-                                pw.println("HTTP/1.0 200 OK");
-                                pw.println("Content-Type: text/html");
-                                pw.println();
-                                pw.println(output);
-                            } catch (Exception ex) {
-                                pw.println("HTTP/1.0 200 OK");
-                                pw.println("Content-Type: text/html");
-                                pw.println();
-                                pw.println("<h1>500 Internal Server Error</h1>");
-                                pw.println(ex);
+                        Matcher matcherHeader = patternHeader.matcher(line);
+                        if (matcherHeader.find()) {
+                            switch (matcherHeader.group(1)) {
+                                case "User-Agent":
+                                    info.setUserAgent(matcherHeader.group(2));
+                                    break;
                             }
                         }
                     }
 
+                    System.out.println("after info:" + info);
+
+                    try (OutputStream os = socket.getOutputStream();
+                         PrintWriter pw = new PrintWriter(os)) {
+
+                        ProcessorMethod method = methods.get(path);
+
+//                        System.out.println("methods:" + methods);
+//                        System.out.println("path:" + path);
+//                        System.out.println("path:" + path.replaceFirst("/index$", "/"));
+
+                        if (method == null) {
+                            pw.println("HTTP/1.0 404 Not Found");
+                            pw.println("Content-Type: text/html");
+                            pw.println();
+                            pw.println("<h1>404 Not Found</h1>");
+                            pw.println(path + " Not Found");
+                            return;
+                        }
+
+                        try {
+                            Object bean = Context.getBean(method.name);
+                            Object output = method.method.invoke(bean);
+                            
+                            pw.println("HTTP/1.0 200 OK");
+                            pw.println("Content-Type: text/html");
+                            pw.println();
+                            pw.println(output);
+                        } catch (Exception ex) {
+                            pw.println("HTTP/1.0 200 OK");
+                            pw.println("Content-Type: text/html");
+                            pw.println();
+                            pw.println("<h1>500 Internal Server Error</h1>");
+                            pw.println(ex);
+                        }
+                    }
                 } catch (IOException e) {
                     System.out.println(e);
                 }
-            }).start();
+            });
         }
     }
 }

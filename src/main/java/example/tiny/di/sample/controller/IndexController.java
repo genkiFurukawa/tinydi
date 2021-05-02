@@ -1,4 +1,4 @@
-package example.tiny.di.sample.mvc;
+package example.tiny.di.sample.controller;
 
 import example.tiny.di.annotation.Path;
 
