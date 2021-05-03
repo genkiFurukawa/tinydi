@@ -78,6 +78,7 @@ public class Server {
                 try (InputStream is = socket.getInputStream();
                      BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(is))
                 ) {
+                    System.out.println("[0] start");
                     // HTTPリクエストの１行目「GET /index HTTP/1.1」とかになっているので抜き出す
                     String first = bufferedReader.readLine();
                     Matcher matcher = pattern.matcher(first);
@@ -86,8 +87,8 @@ public class Server {
                     String path = matcher.group(2);
                     String protocol = matcher.group(3);
 
-                    System.out.println("httpMethod:" + httpMethod + ", path:" + path + ", protocol:" + protocol);
-                    System.out.println("socket.getLocalAddress():" + socket.getLocalAddress());
+//                    System.out.println("httpMethod:" + httpMethod + ", path:" + path + ", protocol:" + protocol);
+//                    System.out.println("socket.getLocalAddress():" + socket.getLocalAddress());
 
                     RequestInfo info = (RequestInfo) Context.getBean("requestInfo");
 
@@ -129,8 +130,6 @@ public class Server {
 
                     info.setSessionId(sessionId);
 
-                    System.out.println("info:" + info);
-
                     try (OutputStream os = socket.getOutputStream();
                          PrintWriter pw = new PrintWriter(os)) {
 
@@ -146,7 +145,13 @@ public class Server {
                         }
 
                         try {
+                            System.out.println("[1] info: " + info);
+                            System.out.println("[1] HashCode:" + info.hashCode());
+
                             Object bean = Context.getBean(method.name);
+                            System.out.println("[2] method.name: " + method.name + ", method.method:" + method.method);
+
+                            // invoke:呼び出す
                             Object output = method.method.invoke(bean);
 
                             pw.println("HTTP/1.0 200 OK");

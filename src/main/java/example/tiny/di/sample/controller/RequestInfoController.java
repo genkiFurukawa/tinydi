@@ -14,7 +14,7 @@ public class RequestInfoController {
 
     @Path("index")
     public String index() {
-        System.out.println("requestInfo:" + requestInfo);
+        System.out.println(">> RequestInfoController.index()");
 
         return String.format("<h1>Info</h1>Host:%s<br/>Path:%s<br/>UserAgent:%s<br/>",
                 requestInfo.getInetAddress(), requestInfo.getPath(), requestInfo.getUserAgent());

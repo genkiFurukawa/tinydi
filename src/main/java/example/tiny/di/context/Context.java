@@ -38,6 +38,7 @@ public class Context {
      * @Namedの付いたクラスをtypesに登録する
      */
     public static void autoRegister() {
+
         try {
             URL res = Main.class.getResource("/" + Main.class.getName().replace('.', '/') + ".class");
 
@@ -83,33 +84,48 @@ public class Context {
      * @return Object
      */
     public static Object getBean(String name) {
+        System.out.println(">> Context.getBean(String " + name + ")");
+
         Class type = types.get(name);
         Objects.requireNonNull(type, name + " not found.");
 
         // @RequestScopedが付いているときは、scopeをrequestBeansにする
         Map<String, Object> scope;
         if (type.isAnnotationPresent(RequestScoped.class)) {
+            System.out.println("RequestScoped.class");
+
             scope = requestBeans.get();
             if (scope == null) {
+                System.out.println("scope is null.");
                 scope = new HashMap<>();
                 requestBeans.set(scope);
             }
-        } else if (type.isAnnotationPresent(BeanSession.class)) {
+        } else if (type.isAnnotationPresent(SessionScoped.class)) {
+            System.out.println("SessionScoped.class");
             scope = beanSession.getBeans();
         }else {
+            System.out.println("else");
             scope = beans;
         }
 
         // 検索してあればそのオブジェクトを返す
         for (Map.Entry<String, Object> bean : scope.entrySet()) {
+            System.out.println("bean.getKey():" + bean.getKey());
             if (bean.getKey().equals(name)) {
+                System.out.println("あるので再利用");
+                System.out.println("<< Context.getBean(String " + name + ")");
                 return bean.getValue();
             }
         }
 
         // ない場合は作成して返す
         try {
-            return createObject(type);
+            System.out.println("ないので生成");
+            System.out.println("<< Context.getBean(String " + name + ")");
+            Object object = createObject(type);
+            scope.put(name, object);
+
+            return object;
         } catch (InstantiationException | IllegalAccessException ex) {
             throw new RuntimeException(name + " can not instanciate", ex);
         }
@@ -220,6 +236,9 @@ public class Context {
      * @throws IllegalAccessException
      */
     private static <T> void inject(Class<T> type, T object) throws IllegalArgumentException, IllegalAccessException {
+        System.out.println(">> Context.inject()");
+        System.out.println("type:" + type + ", object:" + object);
+
         for (Field field : type.getDeclaredFields()) {
             if (!field.isAnnotationPresent(Inject.class)) {
                 continue;
@@ -228,23 +247,26 @@ public class Context {
             field.setAccessible(true);
 
             Object bean;
-            System.out.println(">>");
             System.out.println("type:" + field.getType() + ", name:" + field.getName());
             System.out.println("scopeRank(type):" + scopeRank(type) + ", scopeRank(field.getType()):" + scopeRank(field.getType()));
             if (scopeRank(type) > scopeRank(field.getType())) {
                 bean = getBean(field.getName());
+
                 if (bean == null) {
-                    System.out.println("bean is null");
+                    System.out.println("bean is null. field.getType() is " + field.getType() + ". field.getName() is " + field.getName());
                     bean = scopeWrapper(field.getType(), field.getName());
                 }
             } else {
                 bean = getBean(field.getName());
             }
-            System.out.println("<<");
 
+            System.out.println("bean:" + bean);
+            System.out.println("Hash Code:" + object.hashCode());
             // フィールドに値をセットする
             field.set(object, bean);
         }
+
+        System.out.println("<< Context.inject()");
     }
 
     private static Set<String> cannotOverrides = Stream.of("finalize", "clone").collect(Collectors.toSet());
