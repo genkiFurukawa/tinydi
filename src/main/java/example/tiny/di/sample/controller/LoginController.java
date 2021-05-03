@@ -15,19 +15,25 @@ public class LoginController {
 
     @Path("index")
     public String index() {
+        System.out.println(">> LoginController.index()");
         String title = "<h1>Login</h1>";
         System.out.println("loginSession:" + loginSession);
         if (loginSession.isLogined()) {
+            System.out.println("<< LoginController.index()");
             return title + "Login at " + loginSession.getLoginTime();
         } else {
+            System.out.println("<< LoginController.index()");
             return title + "Not Login";
         }
     }
 
     @Path("login")
     public String login() {
+        System.out.println(">> LoginController.login()");
         loginSession.setLogined(true);
         loginSession.setLoginTime(LocalDateTime.now());
+        System.out.println("loginSession:" + loginSession);
+        System.out.println("<< LoginController.login()");
         return "<h1>Login</h1>login";
     }
 
